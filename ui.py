@@ -8,13 +8,18 @@ from engine import get_ffmpeg_command
 from preview import get_preview_frame
 import network
 import glitch
+import themes
 
 class RetroBranderUI:
     def __init__(self, root):
         self.root = root
         self.root.title("DHTV BRANDER v1.0")
         self.root.geometry("600x850")
-        self.root.configure(bg="#d9d9d9")
+        
+        # Theme Initialization
+        self.current_theme_name = "LIGHT"
+        self.theme = themes.LIGHT
+        self.root.configure(bg=self.theme["bg"])
         
         # Paths
         self.video_path = ""
@@ -67,35 +72,51 @@ class RetroBranderUI:
     def toggle_deck(self):
         if self.deck_state == "MAIN":
             self.deck_state = "OVERLAY"
-            self.deck_button.config(text="DECK: OVERLAY", bg="#80ffff") # Light blue for Overlay
+            self.deck_button.config(text="DECK: OVERLAY", bg=self.theme["deck_overlay"])
         else:
             self.deck_state = "MAIN"
-            self.deck_button.config(text="DECK: MAIN", bg="#d9d9d9")
+            self.deck_button.config(text="DECK: MAIN", bg=self.theme["deck_main"])
 
     def setup_ui(self):
         # Top: Deck Select Toggle
-        self.top_frame = tk.Frame(self.root, bg="#d9d9d9")
+        self.top_frame = tk.Frame(self.root, bg=self.theme["bg"])
         self.top_frame.pack(fill="x", padx=10, pady=5)
         
         self.deck_button = tk.Button(
             self.top_frame,
             text="DECK: MAIN",
-            bg="#d9d9d9",
+            bg=self.theme["deck_main"],
+            fg=self.theme["button_fg"],
+            activebackground=self.theme["active_bg"],
             relief="raised",
             bd=3,
             font=("MS Sans Serif", 8, "bold"),
             command=self.toggle_deck,
             width=20
         )
-        self.deck_button.pack(pady=5)
+        self.deck_button.pack(side="left", pady=5)
+
+        self.theme_button = tk.Button(
+            self.top_frame,
+            text=f"THEME: {self.current_theme_name}",
+            bg=self.theme["button_bg"],
+            fg=self.theme["button_fg"],
+            activebackground=self.theme["active_bg"],
+            relief="raised",
+            bd=3,
+            font=("MS Sans Serif", 8, "bold"),
+            command=self.toggle_theme,
+            width=15
+        )
+        self.theme_button.pack(side="right", pady=5)
 
         # Top: Viewfinder (Canvas)
-        self.viewfinder_frame = tk.Frame(self.root, bg="#000000", bd=2, relief="sunken")
+        self.viewfinder_frame = tk.Frame(self.root, bg=self.theme["viewfinder_bg"], bd=2, relief="sunken")
         self.viewfinder_frame.pack(pady=10, padx=10, fill="both", expand=True)
         
-        self.canvas = tk.Canvas(self.viewfinder_frame, bg="#1a1a1a", highlightthickness=0)
+        self.canvas = tk.Canvas(self.viewfinder_frame, bg=self.theme["canvas_bg"], highlightthickness=0)
         self.canvas.pack(fill="both", expand=True)
-        self.canvas_text = self.canvas.create_text(300, 150, text="[ VIEWFINDER ]", fill="#00ff00", font=("Courier", 12))
+        self.canvas_text = self.canvas.create_text(300, 150, text="[ VIEWFINDER ]", fill=self.theme["viewfinder_fg"], font=("Courier", 12))
 
         # Middle: Notebook
         self.notebook = ttk.Notebook(self.root)
@@ -124,7 +145,7 @@ class RetroBranderUI:
         self.setup_network_tab()
 
         # Bottom: Actions
-        self.bottom_frame = tk.Frame(self.root, bg="#d9d9d9", bd=2, relief="raised")
+        self.bottom_frame = tk.Frame(self.root, bg=self.theme["bg"], bd=2, relief="raised")
         self.bottom_frame.pack(side="bottom", fill="x", padx=10, pady=10)
 
         self.progress_var = tk.DoubleVar()
@@ -134,14 +155,18 @@ class RetroBranderUI:
         self.burn_button = tk.Button(
             self.bottom_frame, 
             text="BURN IT!", 
-            bg="#d9d9d9", 
-            activebackground="#c0c0c0",
+            bg=self.theme["button_bg"], 
+            fg=self.theme["button_fg"],
+            activebackground=self.theme["active_bg"],
             relief="raised",
             bd=3,
             font=("MS Sans Serif", 10, "bold"),
             command=self.start_burn
         )
         self.burn_button.pack(pady=5, padx=10, fill="x")
+        
+        # Apply initial theme styles
+        self.apply_theme()
 
     def manual_load_video(self):
         path = filedialog.askopenfilename(filetypes=[("Video files", "*.mp4 *.mkv *.avi *.mov")])
@@ -206,9 +231,9 @@ class RetroBranderUI:
         self.corner_var.set(corner)
         for val, btn in self.corner_btns.items():
             if val == corner:
-                btn.config(relief="sunken", bg="#c0c0c0")
+                btn.config(relief="sunken", bg=self.theme["sunken_bg"])
             else:
-                btn.config(relief="raised", bg="#d9d9d9")
+                btn.config(relief="raised", bg=self.theme["button_bg"])
         self.update_preview()
 
     def setup_overlay_tab(self):
@@ -359,6 +384,11 @@ class RetroBranderUI:
         finally:
             self.mosh_btn.config(state="normal", text="PREVIEW MOSH (3s)")
 
+    def browse_output_folder(self):
+        folder = filedialog.askdirectory()
+        if folder:
+            self.out_folder_path.set(folder)
+
     def get_settings(self):
         return {
             'logo_padx': self.logo_padx.get(),
@@ -376,7 +406,14 @@ class RetroBranderUI:
             'ov_trans_dur': self.ov_trans_dur.get(),
             'mosh_freq': self.mosh_freq.get(),
             'mosh_dur': self.mosh_dur.get(),
-            'use_nvenc': self.use_nvenc.get()
+            'audio_mode': self.audio_mode.get(),
+            'use_nvenc': self.use_nvenc.get(),
+            'out_res': self.out_res.get(),
+            'out_crf': self.out_crf.get(),
+            'out_fps': self.out_fps.get(),
+            'out_name': self.out_name.get(),
+            'out_folder': self.out_folder_path.get(),
+            'open_folder': self.open_folder.get()
         }
 
     def update_preview(self):
@@ -402,17 +439,142 @@ class RetroBranderUI:
     def setup_output_tab(self):
         f = self.output_tab
 
-        tk.Label(f, text="Format:").grid(row=0, column=0, sticky="w", padx=5, pady=5)
-        self.out_format = ttk.Combobox(f, values=[".mp4", ".mkv"], state="readonly")
-        self.out_format.set(".mp4")
-        self.out_format.grid(row=0, column=1, sticky="w", padx=5, pady=5)
+        # Resolution
+        tk.Label(f, text="Resolution:").grid(row=0, column=0, sticky="w", padx=5, pady=5)
+        self.out_res = ttk.Combobox(f, values=["Original", "1080p", "720p", "480p"], state="readonly")
+        self.out_res.set("Original")
+        self.out_res.grid(row=0, column=1, sticky="w", padx=5, pady=5)
 
+        # Quality (CRF)
+        tk.Label(f, text="Quality (CRF):").grid(row=1, column=0, sticky="w", padx=5, pady=5)
+        self.out_crf = tk.Scale(f, from_=0, to=51, orient="horizontal", bg=self.theme["bg"], length=400)
+        self.out_crf.set(23)
+        self.out_crf.grid(row=1, column=1, padx=5, pady=5)
+
+        # Framerate
+        tk.Label(f, text="Framerate:").grid(row=2, column=0, sticky="w", padx=5, pady=5)
+        self.out_fps = ttk.Combobox(f, values=["Original", "24", "30", "60"], state="readonly")
+        self.out_fps.set("Original")
+        self.out_fps.grid(row=2, column=1, sticky="w", padx=5, pady=5)
+
+        # Output Name
+        tk.Label(f, text="Output Name:").grid(row=3, column=0, sticky="w", padx=5, pady=5)
+        self.out_name = tk.Entry(f, width=40, bg=self.theme["entry_bg"], fg=self.theme["entry_fg"])
+        self.out_name.insert(0, "{original}_branded")
+        self.out_name.grid(row=3, column=1, sticky="w", padx=5, pady=5)
+
+        # Output Folder
+        tk.Label(f, text="Output Folder:").grid(row=4, column=0, sticky="w", padx=5, pady=5)
+        self.out_folder_frame = tk.Frame(f, bg=self.theme["bg"])
+        self.out_folder_frame.grid(row=4, column=1, sticky="w", padx=5, pady=5)
+        
+        self.out_folder_path = tk.StringVar()
+        self.out_folder_entry = tk.Entry(self.out_folder_frame, textvariable=self.out_folder_path, width=40, bg=self.theme["entry_bg"], fg=self.theme["entry_fg"])
+        self.out_folder_entry.pack(side="left")
+        
+        self.browse_folder_btn = tk.Button(self.out_folder_frame, text="Browse...", command=self.browse_output_folder, bg=self.theme["button_bg"], fg=self.theme["button_fg"])
+        self.browse_folder_btn.pack(side="left", padx=5)
+
+        # Open Folder Checkbox
+        self.open_folder = tk.BooleanVar(value=True)
+        self.open_folder_check = tk.Checkbutton(f, text="Open Folder After Burn", variable=self.open_folder, bg=self.theme["bg"])
+        self.open_folder_check.grid(row=5, column=0, columnspan=2, sticky="w", padx=5, pady=5)
+
+        # Hardware Acceleration
         self.use_nvenc = tk.BooleanVar(value=True)
-        self.nvenc_check = tk.Checkbutton(f, text="Use NVIDIA NVENC", variable=self.use_nvenc, bg="#d9d9d9")
-        self.nvenc_check.grid(row=1, column=0, columnspan=2, sticky="w", padx=5, pady=5)
+        self.nvenc_check = tk.Checkbutton(f, text="Use NVIDIA NVENC (Recommended)", variable=self.use_nvenc, bg=self.theme["bg"])
+        self.nvenc_check.grid(row=6, column=0, columnspan=2, sticky="w", padx=5, pady=5)
+
+        # Audio Mode
+        tk.Label(f, text="Audio Mode:").grid(row=7, column=0, sticky="w", padx=5, pady=5)
+        self.audio_mode = ttk.Combobox(f, values=["Original", "Mute Main", "Overlay Only", "Silent"], state="readonly")
+        self.audio_mode.set("Original")
+        self.audio_mode.grid(row=7, column=1, sticky="w", padx=5, pady=5)
 
     def start_burn(self):
         messagebox.showinfo("Burn It!", "Ready to burn. Logic pending Task 5 integration.")
+
+    def toggle_theme(self):
+        if self.current_theme_name == "LIGHT":
+            self.current_theme_name = "DARK"
+            self.theme = themes.DARK
+        else:
+            self.current_theme_name = "LIGHT"
+            self.theme = themes.LIGHT
+            
+        self.theme_button.config(text=f"THEME: {self.current_theme_name}")
+        self.apply_theme()
+
+    def update_styles(self):
+        style = ttk.Style()
+        style.theme_use('classic')
+        style.configure("TFrame", background=self.theme["bg"])
+        style.configure("TLabel", background=self.theme["bg"], foreground=self.theme["fg"], font=("MS Sans Serif", 8))
+        style.configure("TButton", background=self.theme["button_bg"], foreground=self.theme["button_fg"], font=("MS Sans Serif", 8, "bold"))
+        style.configure("TNotebook", background=self.theme["bg"])
+        style.configure("TNotebook.Tab", background=self.theme["bg"], foreground=self.theme["fg"], font=("MS Sans Serif", 8))
+        style.configure("TCombobox", fieldbackground=self.theme["entry_bg"], background=self.theme["button_bg"], foreground=self.theme["entry_fg"])
+
+    def apply_theme(self):
+        self.root.configure(bg=self.theme["bg"])
+        self.update_styles()
+        self.update_widget_colors(self.root)
+        
+        # Specific overrides for non-standard elements
+        if hasattr(self, 'canvas'):
+            self.canvas.configure(bg=self.theme["canvas_bg"])
+            self.viewfinder_frame.configure(bg=self.theme["viewfinder_bg"])
+            self.canvas.itemconfig(self.canvas_text, fill=self.theme["viewfinder_fg"])
+        
+        # Update deck button color
+        if hasattr(self, 'deck_button'):
+            if self.deck_state == "MAIN":
+                self.deck_button.config(bg=self.theme["deck_main"])
+            else:
+                self.deck_button.config(bg=self.theme["deck_overlay"])
+            
+        # Update corner buttons
+        if hasattr(self, 'corner_btns'):
+            self.set_corner(self.corner_var.get())
+
+    def update_widget_colors(self, container):
+        for widget in container.winfo_children():
+            w_type = widget.winfo_class()
+            
+            # Skip ttk widgets as they are handled by styles
+            if w_type.startswith("T"):
+                # But recurse into them!
+                if widget.winfo_children():
+                    self.update_widget_colors(widget)
+                continue
+
+            try:
+                if w_type == "Frame":
+                    widget.configure(bg=self.theme["bg"])
+                elif w_type == "Label":
+                    widget.configure(bg=self.theme["bg"], fg=self.theme["fg"])
+                elif w_type == "Button":
+                    # Special buttons might have their own bg logic in apply_theme
+                    if widget not in [self.deck_button, self.theme_button, self.burn_button]:
+                        widget.configure(bg=self.theme["button_bg"], fg=self.theme["button_fg"], activebackground=self.theme["active_bg"])
+                    else:
+                        widget.configure(fg=self.theme["button_fg"], activebackground=self.theme["active_bg"])
+                        if widget in [self.theme_button, self.burn_button]:
+                            widget.configure(bg=self.theme["button_bg"])
+                elif w_type == "Scale":
+                    widget.configure(bg=self.theme["bg"], fg=self.theme["fg"], highlightbackground=self.theme["bg"])
+                elif w_type == "Checkbutton":
+                    widget.configure(bg=self.theme["bg"], fg=self.theme["fg"], selectcolor=self.theme["entry_bg"], activebackground=self.theme["bg"], activeforeground=self.theme["fg"])
+                elif w_type == "Radiobutton":
+                    widget.configure(bg=self.theme["bg"], fg=self.theme["fg"], selectcolor=self.theme["entry_bg"], activebackground=self.theme["bg"], activeforeground=self.theme["fg"])
+                elif w_type == "Entry":
+                    widget.configure(bg=self.theme["entry_bg"], fg=self.theme["entry_fg"], insertbackground=self.theme["entry_fg"])
+            except tk.TclError:
+                pass # Some widgets might not support certain properties
+            
+            # Recurse
+            if widget.winfo_children():
+                self.update_widget_colors(widget)
 
 if __name__ == "__main__":
     root = tk.Tk()

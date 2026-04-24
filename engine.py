@@ -1,11 +1,12 @@
 import subprocess
 import os
 
-def get_ffmpeg_command(input_video, logo, overlay_path, output, settings):
+def get_ffmpeg_command(input_video, logo, overlay_path, settings):
     """
     Generates the FFmpeg command for branding a video with a logo and a periodic overlay.
     """
-    v_codec = "h264_nvenc" if settings.get('use_nvenc', False) else "libx264"
+    use_nvenc = settings.get('use_nvenc', False)
+    v_codec = "h264_nvenc" if use_nvenc else "libx264"
     
     # Logic for looping: -ignore_loop for GIF, -stream_loop for Video
     is_gif = overlay_path.lower().endswith('.gif') if overlay_path else False
@@ -61,7 +62,7 @@ def get_ffmpeg_command(input_video, logo, overlay_path, output, settings):
         ov_y = "(H-h)/2"
     
     cmd = [
-        'ffmpeg', '-hwaccel', 'cuda' if settings.get('use_nvenc', False) else 'auto'
+        'ffmpeg', '-hwaccel', 'cuda' if use_nvenc else 'auto'
     ]
 
     if logo:
@@ -73,7 +74,7 @@ def get_ffmpeg_command(input_video, logo, overlay_path, output, settings):
             f"[1:v]{logo_filters}[l_proc]; "
             f"[0:v][l_proc]overlay={logo_pos}[v_logo]; "
             f"[2:v]scale=iw*{overlay_scale}:-1,{opacity_filter}[ovl]; "
-            f"[v_logo][ovl]overlay={ov_x}:{ov_y}:enable='{enable_expr}':shortest=1"
+            f"[v_logo][ovl]overlay={ov_x}:{ov_y}:enable='{enable_expr}':shortest=1[v_out]"
         )
         cmd.extend(['-i', input_video, '-i', logo])
         cmd.extend(loop_flag)
@@ -82,17 +83,64 @@ def get_ffmpeg_command(input_video, logo, overlay_path, output, settings):
         filter_str = (
             f"[0:v]scale=iw:ih[v_bg]; "
             f"[1:v]scale=iw*{overlay_scale}:-1,{opacity_filter}[ovl]; "
-            f"[v_bg][ovl]overlay={ov_x}:{ov_y}:enable='{enable_expr}':shortest=1"
+            f"[v_bg][ovl]overlay={ov_x}:{ov_y}:enable='{enable_expr}':shortest=1[v_out]"
         )
         cmd.extend(['-i', input_video])
         cmd.extend(loop_flag)
         cmd.extend(['-i', overlay_path])
 
+    cmd.extend(['-filter_complex', filter_str, '-map', '[v_out]'])
+    
+    # Audio Routing Logic
+    audio_mode = settings.get('audio_mode', 'Original')
+    if audio_mode == 'Original':
+        cmd.extend(['-map', '0:a?'])
+    elif audio_mode == 'Overlay Only':
+        overlay_index = 2 if logo else 1
+        cmd.extend(['-map', f'{overlay_index}:a?'])
+    elif audio_mode == 'Silent' or audio_mode == 'Mute Main':
+        cmd.append('-an')
+
     cmd.extend([
-        '-filter_complex', filter_str,
-        '-c:v', v_codec, '-preset', 'p4', '-tune', 'hq', '-pix_fmt', 'yuv420p',
-        '-c:a', 'copy', output, '-y'
+        '-c:v', v_codec, '-preset', 'p4', '-tune', 'hq', '-pix_fmt', 'yuv420p'
     ])
+
+    # Pro Settings: Resolution
+    out_res = settings.get('out_res', 'Original')
+    if out_res != 'Original':
+        res_map = {"1080p": "1920x1080", "720p": "1280x720", "480p": "854x480"}
+        cmd.extend(['-s', res_map.get(out_res, out_res)])
+
+    # Pro Settings: Quality (CRF/QP)
+    out_crf = settings.get('out_crf', 23)
+    if use_nvenc:
+        cmd.extend(['-qp', str(out_crf)])
+    else:
+        cmd.extend(['-crf', str(out_crf)])
+
+    # Pro Settings: Framerate
+    out_fps = settings.get('out_fps', 'Original')
+    if out_fps != 'Original':
+        cmd.extend(['-r', str(out_fps)])
+    
+    if audio_mode != 'Silent' and audio_mode != 'Mute Main':
+        cmd.extend(['-c:a', 'copy'])
+        
+    # Pro Settings: Dynamic Output Path
+    out_folder = settings.get('out_folder')
+    out_name_template = settings.get('out_name', '{original}_branded')
+    
+    base_name = os.path.splitext(os.path.basename(input_video))[0]
+    out_filename = out_name_template.replace('{original}', base_name)
+    if not out_filename.endswith('.mp4'):
+        out_filename += ".mp4"
+        
+    if out_folder and os.path.exists(out_folder):
+        output_path = os.path.join(out_folder, out_filename)
+    else:
+        output_path = os.path.join(os.path.dirname(input_video), out_filename)
+
+    cmd.extend([output_path, '-y'])
     
     return cmd
 
