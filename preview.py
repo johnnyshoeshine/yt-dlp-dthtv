@@ -1,5 +1,5 @@
 import cv2
-from PIL import Image, ImageTk, ImageDraw
+from PIL import Image, ImageTk, ImageDraw, ImageOps
 import numpy as np
 import os
 
@@ -7,19 +7,7 @@ def get_preview_frame(video_path, logo_path, overlay_path, settings, max_size=(3
     """
     Grabs the first frame of the video, applies logo and overlay based on settings,
     and returns a Tkinter-compatible image.
-    
-    settings = {
-        'logo_padx': 10,
-        'logo_pady': 10,
-        'logo_scale': 1.0,
-        'ov_scale': 0.7,
-        'ov_opacity': 1.0,
-        'ov_blend': 'normal'
-    }
     """
-    if not os.path.exists(video_path):
-        return None
-
     # 1. Grab frame using OpenCV
     cap = cv2.VideoCapture(video_path)
     success, frame = cap.read()
@@ -39,6 +27,14 @@ def get_preview_frame(video_path, logo_path, overlay_path, settings, max_size=(3
     if logo_path and os.path.exists(logo_path):
         logo = Image.open(logo_path).convert("RGBA")
         
+        # Invert Logo Colors if requested
+        if settings.get('logo_invert', False):
+            # For RGBA, we only want to invert the RGB channels
+            r, g, b, a = logo.split()
+            inverted_rgb = ImageOps.invert(Image.merge("RGB", (r, g, b)))
+            ir, ig, ib = inverted_rgb.split()
+            logo = Image.merge("RGBA", (ir, ig, ib, a))
+
         # Scale logo
         l_scale = settings.get('logo_scale', 1.0)
         l_w, l_h = logo.size
@@ -46,11 +42,19 @@ def get_preview_frame(video_path, logo_path, overlay_path, settings, max_size=(3
         new_l_h = int(l_h * l_scale)
         logo = logo.resize((new_l_w, new_l_h), Image.Resampling.LANCZOS)
         
-        # Calculate position (Bottom Right with Padding)
+        # Calculate position based on corner
         padx = settings.get('logo_padx', 10)
         pady = settings.get('logo_pady', 10)
-        pos_x = orig_w - new_l_w - padx
-        pos_y = orig_h - new_l_h - pady
+        corner = settings.get('logo_corner', 'BR')
+        
+        if corner == 'TL':
+            pos_x, pos_y = padx, pady
+        elif corner == 'TR':
+            pos_x, pos_y = orig_w - new_l_w - padx, pady
+        elif corner == 'BL':
+            pos_x, pos_y = padx, orig_h - new_l_h - pady
+        else: # BR
+            pos_x, pos_y = orig_w - new_l_w - padx, orig_h - new_l_h - pady
         
         # Paste logo (using itself as mask for transparency)
         pil_frame.paste(logo, (pos_x, pos_y), logo)

@@ -2,21 +2,25 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import os
 import sys
+import subprocess
 import windnd
 from engine import get_ffmpeg_command
 from preview import get_preview_frame
+import network
+import glitch
 
 class RetroBranderUI:
     def __init__(self, root):
         self.root = root
         self.root.title("DHTV BRANDER v1.0")
-        self.root.geometry("600x800")
+        self.root.geometry("600x850")
         self.root.configure(bg="#d9d9d9")
         
         # Paths
         self.video_path = ""
         self.logo_path = ""
         self.overlay_path = ""
+        self.deck_state = "MAIN" # DECK SELECT state: MAIN or OVERLAY
         self.photo = None # Keep reference to avoid garbage collection
         
         # Retro Style configuration
@@ -43,24 +47,48 @@ class RetroBranderUI:
             path = f.decode('utf-8') if isinstance(f, bytes) else f
             ext = os.path.splitext(path)[1].lower()
             
-            if ext in ['.mp4', '.mkv', '.avi', '.mov']:
-                # If we already have a video, maybe this is the overlay?
-                if not self.video_path:
+            if self.deck_state == "MAIN":
+                if ext in ['.mp4', '.mkv', '.avi', '.mov']:
                     self.video_path = path
-                    print(f"Video set: {path}")
-                else:
+                    print(f"Background set: {path}")
+                elif ext in ['.png', '.jpg', '.jpeg', '.webp']:
+                    self.logo_path = path
+                    print(f"Logo set: {path}")
+            else: # OVERLAY mode
+                if ext in ['.mp4', '.mkv', '.avi', '.mov', '.gif']:
                     self.overlay_path = path
-                    print(f"Overlay set (video): {path}")
-            elif ext in ['.png', '.jpg', '.jpeg', '.webp']:
-                self.logo_path = path
-                print(f"Logo set: {path}")
-            elif ext in ['.gif']:
-                self.overlay_path = path
-                print(f"Overlay set (gif): {path}")
+                    print(f"Overlay set: {path}")
+                elif ext in ['.png', '.jpg', '.jpeg', '.webp']:
+                    self.logo_path = path # Logos can still be dropped in overlay mode
+                    print(f"Logo set: {path}")
         
         self.update_preview()
         
+    def toggle_deck(self):
+        if self.deck_state == "MAIN":
+            self.deck_state = "OVERLAY"
+            self.deck_button.config(text="DECK: OVERLAY", bg="#80ffff") # Light blue for Overlay
+        else:
+            self.deck_state = "MAIN"
+            self.deck_button.config(text="DECK: MAIN", bg="#d9d9d9")
+
     def setup_ui(self):
+        # Top: Deck Select Toggle
+        self.top_frame = tk.Frame(self.root, bg="#d9d9d9")
+        self.top_frame.pack(fill="x", padx=10, pady=5)
+        
+        self.deck_button = tk.Button(
+            self.top_frame,
+            text="DECK: MAIN",
+            bg="#d9d9d9",
+            relief="raised",
+            bd=3,
+            font=("MS Sans Serif", 8, "bold"),
+            command=self.toggle_deck,
+            width=20
+        )
+        self.deck_button.pack(pady=5)
+
         # Top: Viewfinder (Canvas)
         self.viewfinder_frame = tk.Frame(self.root, bg="#000000", bd=2, relief="sunken")
         self.viewfinder_frame.pack(pady=10, padx=10, fill="both", expand=True)
@@ -76,15 +104,24 @@ class RetroBranderUI:
         # Tabs
         self.logo_tab = ttk.Frame(self.notebook)
         self.overlay_tab = ttk.Frame(self.notebook)
+        self.trans_tab = ttk.Frame(self.notebook)
+        self.glitch_tab = ttk.Frame(self.notebook)
         self.output_tab = ttk.Frame(self.notebook)
+        self.network_tab = ttk.Frame(self.notebook)
 
         self.notebook.add(self.logo_tab, text="Logo")
         self.notebook.add(self.overlay_tab, text="Overlay")
+        self.notebook.add(self.trans_tab, text="Transitions")
+        self.notebook.add(self.glitch_tab, text="Glitch")
         self.notebook.add(self.output_tab, text="Output")
+        self.notebook.add(self.network_tab, text="Network")
 
         self.setup_logo_tab()
         self.setup_overlay_tab()
+        self.setup_trans_tab()
+        self.setup_glitch_tab()
         self.setup_output_tab()
+        self.setup_network_tab()
 
         # Bottom: Actions
         self.bottom_frame = tk.Frame(self.root, bg="#d9d9d9", bd=2, relief="raised")
@@ -106,63 +143,240 @@ class RetroBranderUI:
         )
         self.burn_button.pack(pady=5, padx=10, fill="x")
 
+    def manual_load_video(self):
+        path = filedialog.askopenfilename(filetypes=[("Video files", "*.mp4 *.mkv *.avi *.mov")])
+        if path:
+            self.video_path = path
+            self.update_preview()
+
+    def manual_load_overlay(self):
+        path = filedialog.askopenfilename(filetypes=[("Video/GIF files", "*.mp4 *.mkv *.avi *.mov *.gif")])
+        if path:
+            self.overlay_path = path
+            self.update_preview()
+
     def setup_logo_tab(self):
         # Padding X, Padding Y, Scale
         f = self.logo_tab
         
-        tk.Label(f, text="X Padding:").grid(row=0, column=0, sticky="w", padx=5, pady=5)
+        self.load_bg_btn = tk.Button(f, text="Load Background...", command=self.manual_load_video, bg="#d9d9d9", relief="raised")
+        self.load_bg_btn.grid(row=0, column=0, columnspan=2, pady=10, padx=5, sticky="w")
+
+        tk.Label(f, text="X Padding:").grid(row=1, column=0, sticky="w", padx=5, pady=5)
         self.logo_padx = tk.Scale(f, from_=0, to=100, orient="horizontal", bg="#d9d9d9", length=400, command=lambda x: self.update_preview())
         self.logo_padx.set(10)
-        self.logo_padx.grid(row=0, column=1, padx=5, pady=5)
+        self.logo_padx.grid(row=1, column=1, padx=5, pady=5)
 
-        tk.Label(f, text="Y Padding:").grid(row=1, column=0, sticky="w", padx=5, pady=5)
+        tk.Label(f, text="Y Padding:").grid(row=2, column=0, sticky="w", padx=5, pady=5)
         self.logo_pady = tk.Scale(f, from_=0, to=100, orient="horizontal", bg="#d9d9d9", length=400, command=lambda x: self.update_preview())
         self.logo_pady.set(10)
-        self.logo_pady.grid(row=1, column=1, padx=5, pady=5)
+        self.logo_pady.grid(row=2, column=1, padx=5, pady=5)
 
-        tk.Label(f, text="Scale:").grid(row=2, column=0, sticky="w", padx=5, pady=5)
+        tk.Label(f, text="Scale:").grid(row=3, column=0, sticky="w", padx=5, pady=5)
         self.logo_scale = tk.Scale(f, from_=0.1, to=2.0, resolution=0.1, orient="horizontal", bg="#d9d9d9", length=400, command=lambda x: self.update_preview())
         self.logo_scale.set(1.0)
-        self.logo_scale.grid(row=2, column=1, padx=5, pady=5)
+        self.logo_scale.grid(row=3, column=1, padx=5, pady=5)
+
+        # Corner Picker
+        tk.Label(f, text="Corner:").grid(row=4, column=0, sticky="w", padx=5, pady=5)
+        self.corner_frame = tk.Frame(f, bg="#d9d9d9")
+        self.corner_frame.grid(row=4, column=1, sticky="w", padx=5, pady=5)
+        
+        self.corner_var = tk.StringVar(value="BR")
+        self.corner_btns = {}
+        for i, (label, value) in enumerate([("TL", "TL"), ("TR", "TR"), ("BL", "BL"), ("BR", "BR")]):
+            btn = tk.Button(
+                self.corner_frame, 
+                text=label, 
+                width=4, 
+                command=lambda v=value: self.set_corner(v),
+                relief="raised",
+                bg="#d9d9d9"
+            )
+            btn.grid(row=i//2, column=i%2, padx=2, pady=2)
+            self.corner_btns[value] = btn
+        self.set_corner("BR") # Default
+
+        # Invert Toggle
+        self.invert_logo = tk.BooleanVar(value=False)
+        self.invert_check = tk.Checkbutton(f, text="Invert Logo Colors", variable=self.invert_logo, bg="#d9d9d9", command=self.update_preview)
+        self.invert_check.grid(row=5, column=0, columnspan=2, sticky="w", padx=5, pady=5)
+
+    def set_corner(self, corner):
+        self.corner_var.set(corner)
+        for val, btn in self.corner_btns.items():
+            if val == corner:
+                btn.config(relief="sunken", bg="#c0c0c0")
+            else:
+                btn.config(relief="raised", bg="#d9d9d9")
+        self.update_preview()
 
     def setup_overlay_tab(self):
         # Freq, Dur, Scale, Opacity
         f = self.overlay_tab
+        
+        self.load_ov_btn = tk.Button(f, text="Load Overlay...", command=self.manual_load_overlay, bg="#d9d9d9", relief="raised")
+        self.load_ov_btn.grid(row=0, column=0, columnspan=2, pady=10, padx=5, sticky="w")
 
-        tk.Label(f, text="Frequency (m):").grid(row=0, column=0, sticky="w", padx=5, pady=5)
+        tk.Label(f, text="Frequency (m):").grid(row=1, column=0, sticky="w", padx=5, pady=5)
         self.ov_freq = tk.Scale(f, from_=1, to=60, orient="horizontal", bg="#d9d9d9", length=400)
         self.ov_freq.set(5)
-        self.ov_freq.grid(row=0, column=1, padx=5, pady=5)
+        self.ov_freq.grid(row=1, column=1, padx=5, pady=5)
 
-        tk.Label(f, text="Duration (s):").grid(row=1, column=0, sticky="w", padx=5, pady=5)
+        tk.Label(f, text="Duration (s):").grid(row=2, column=0, sticky="w", padx=5, pady=5)
         self.ov_dur = tk.Scale(f, from_=1, to=120, orient="horizontal", bg="#d9d9d9", length=400)
         self.ov_dur.set(30)
-        self.ov_dur.grid(row=1, column=1, padx=5, pady=5)
+        self.ov_dur.grid(row=2, column=1, padx=5, pady=5)
 
-        tk.Label(f, text="Scale (%):").grid(row=2, column=0, sticky="w", padx=5, pady=5)
+        tk.Label(f, text="Scale (%):").grid(row=3, column=0, sticky="w", padx=5, pady=5)
         self.ov_scale = tk.Scale(f, from_=10, to=200, orient="horizontal", bg="#d9d9d9", length=400, command=lambda x: self.update_preview())
         self.ov_scale.set(70)
-        self.ov_scale.grid(row=2, column=1, padx=5, pady=5)
+        self.ov_scale.grid(row=3, column=1, padx=5, pady=5)
 
-        tk.Label(f, text="Opacity:").grid(row=3, column=0, sticky="w", padx=5, pady=5)
+        tk.Label(f, text="Opacity:").grid(row=4, column=0, sticky="w", padx=5, pady=5)
         self.ov_opacity = tk.Scale(f, from_=0.0, to=1.0, resolution=0.1, orient="horizontal", bg="#d9d9d9", length=400, command=lambda x: self.update_preview())
         self.ov_opacity.set(1.0)
-        self.ov_opacity.grid(row=3, column=1, padx=5, pady=5)
+        self.ov_opacity.grid(row=4, column=1, padx=5, pady=5)
 
-        tk.Label(f, text="Blend Mode:").grid(row=4, column=0, sticky="w", padx=5, pady=5)
+        tk.Label(f, text="Blend Mode:").grid(row=5, column=0, sticky="w", padx=5, pady=5)
         self.ov_blend = ttk.Combobox(f, values=["normal", "multiply", "screen", "overlay", "darken", "lighten"], state="readonly")
         self.ov_blend.set("normal")
-        self.ov_blend.grid(row=4, column=1, sticky="w", padx=5, pady=5)
+        self.ov_blend.grid(row=5, column=1, sticky="w", padx=5, pady=5)
         self.ov_blend.bind("<<ComboboxSelected>>", lambda e: self.update_preview())
+
+    def setup_trans_tab(self):
+        f = self.trans_tab
+        
+        tk.Label(f, text="Transition Type:").grid(row=0, column=0, sticky="w", padx=5, pady=5)
+        self.ov_trans = ttk.Combobox(f, values=["None", "Fade", "Slide"], state="readonly")
+        self.ov_trans.set("None")
+        self.ov_trans.grid(row=0, column=1, sticky="w", padx=5, pady=5)
+        
+        self.ov_continuous = tk.BooleanVar(value=False)
+        self.continuous_check = tk.Checkbutton(f, text="Continuous Mode (Always On)", variable=self.ov_continuous, bg="#d9d9d9")
+        self.continuous_check.grid(row=1, column=0, columnspan=2, sticky="w", padx=5, pady=5)
+        
+        tk.Label(f, text="Trans. Duration (s):").grid(row=2, column=0, sticky="w", padx=5, pady=5)
+        self.ov_trans_dur = tk.Scale(f, from_=0.1, to=5.0, resolution=0.1, orient="horizontal", bg="#d9d9d9", length=400)
+        self.ov_trans_dur.set(1.0)
+        self.ov_trans_dur.grid(row=2, column=1, padx=5, pady=5)
+
+    def setup_network_tab(self):
+        f = self.network_tab
+        
+        tk.Label(f, text="Video URL:").grid(row=0, column=0, sticky="w", padx=5, pady=5)
+        self.url_entry = tk.Entry(f, width=50)
+        self.url_entry.grid(row=0, column=1, padx=5, pady=5, sticky="w")
+        
+        tk.Label(f, text="Method:").grid(row=1, column=0, sticky="w", padx=5, pady=5)
+        self.method_var = tk.StringVar(value="download")
+        tk.Radiobutton(f, text="Download", variable=self.method_var, value="download", bg="#d9d9d9").grid(row=1, column=1, sticky="w")
+        tk.Radiobutton(f, text="Stream", variable=self.method_var, value="stream", bg="#d9d9d9").grid(row=1, column=1, padx=100, sticky="w")
+        
+        self.load_button = tk.Button(f, text="LOAD URL", command=self.load_url, bg="#d9d9d9", relief="raised")
+        self.load_button.grid(row=2, column=0, columnspan=2, pady=10)
+        
+        self.net_status = tk.Label(f, text="Status: Ready", fg="blue")
+        self.net_status.grid(row=3, column=0, columnspan=2)
+
+    def load_url(self):
+        url = self.url_entry.get().strip()
+        if not url: return
+        
+        target = "background" if self.deck_state == "MAIN" else "overlay"
+        method = self.method_var.get()
+        
+        self.net_status.config(text=f"Status: Initializing {method}...", fg="orange")
+        self.load_button.config(state="disabled")
+
+        def callback(result, error):
+            self.root.after(0, lambda: self.handle_load_result(result, error, target))
+
+        if method == "stream":
+            network.get_stream_url(url, callback)
+        else:
+            network.download_video(url, callback)
+
+    def handle_load_result(self, result, error, target):
+        self.load_button.config(state="normal")
+        if error:
+            self.net_status.config(text=f"Status: Error - {error[:50]}...", fg="red")
+            messagebox.showerror("Network Error", error)
+        else:
+            self.net_status.config(text="Status: Complete!", fg="green")
+            if target == "background":
+                self.video_path = result
+            else:
+                self.overlay_path = result
+            self.update_preview()
+
+
+    def setup_glitch_tab(self):
+        f = self.glitch_tab
+        
+        tk.Label(f, text="Mosh Frequency:").grid(row=0, column=0, sticky="w", padx=5, pady=5)
+        self.mosh_freq = tk.Scale(f, from_=0.0, to=1.0, resolution=0.01, orient="horizontal", bg="#d9d9d9", length=400)
+        self.mosh_freq.set(0.1)
+        self.mosh_freq.grid(row=0, column=1, padx=5, pady=5)
+        
+        tk.Label(f, text="Mosh Duration:").grid(row=1, column=0, sticky="w", padx=5, pady=5)
+        self.mosh_dur = tk.Scale(f, from_=1, to=30, orient="horizontal", bg="#d9d9d9", length=400)
+        self.mosh_dur.set(5)
+        self.mosh_dur.grid(row=1, column=1, padx=5, pady=5)
+        
+        self.mosh_btn = tk.Button(f, text="PREVIEW MOSH (3s)", command=self.preview_mosh, bg="#d9d9d9", relief="raised")
+        self.mosh_btn.grid(row=2, column=0, columnspan=2, pady=20)
+
+    def preview_mosh(self):
+        if not self.video_path:
+            messagebox.showwarning("Warning", "Load a video first!")
+            return
+            
+        self.mosh_btn.config(state="disabled", text="MOSHING...")
+        self.root.update()
+        
+        try:
+            # 1. Extract a 3-second clip
+            temp_clip = "temp_preview_clip.mp4"
+            subprocess.run([
+                'ffmpeg', '-y', '-ss', '0', '-i', self.video_path,
+                '-t', '3', '-c', 'copy', temp_clip
+            ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            # 2. Mosh it
+            mosh_out = "preview_mosh.mp4"
+            glitch.mosh_video(temp_clip, mosh_out, self.mosh_freq.get(), self.mosh_dur.get())
+            
+            # 3. Play it (or show in viewfinder)
+            # For now, we just open it with system default
+            os.startfile(mosh_out)
+            
+            # Clean up temp files later or just leave them
+            if os.path.exists(temp_clip): os.remove(temp_clip)
+            
+        except Exception as e:
+            messagebox.showerror("Mosh Error", str(e))
+        finally:
+            self.mosh_btn.config(state="normal", text="PREVIEW MOSH (3s)")
 
     def get_settings(self):
         return {
             'logo_padx': self.logo_padx.get(),
             'logo_pady': self.logo_pady.get(),
             'logo_scale': self.logo_scale.get(),
+            'logo_corner': self.corner_var.get(),
+            'logo_invert': self.invert_logo.get(),
+            'ov_freq': self.ov_freq.get() * 60,
+            'ov_dur': self.ov_dur.get(),
             'ov_scale': self.ov_scale.get() / 100.0,
             'ov_opacity': self.ov_opacity.get(),
-            'ov_blend': self.ov_blend.get()
+            'ov_blend': self.ov_blend.get(),
+            'ov_trans': self.ov_trans.get(),
+            'ov_continuous': self.ov_continuous.get(),
+            'ov_trans_dur': self.ov_trans_dur.get(),
+            'mosh_freq': self.mosh_freq.get(),
+            'mosh_dur': self.mosh_dur.get(),
+            'use_nvenc': self.use_nvenc.get()
         }
 
     def update_preview(self):
